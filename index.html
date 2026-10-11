@@ -46,10 +46,11 @@ button{font:inherit;cursor:pointer}
 .why{font-size:13px;color:var(--mut);font-weight:400}
 .due{color:var(--warn)}
 details{margin-bottom:6px}summary{font:700 16px 'Bricolage Grotesque',sans-serif;padding:10px 0;cursor:pointer}
+.sy{float:right;border:1px solid var(--line);background:var(--card);color:var(--mut);border-radius:999px;padding:6px 12px;font:600 13px Figtree,sans-serif;margin-top:6px}.sy.ok{color:var(--acc);border-color:var(--acc)}.sy.er{color:var(--warn);border-color:var(--warn)}.pan{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
 </style>
 </head>
 <body>
-<header><h1>Lista della spesa</h1><div class="sub" id="sub"></div></header>
+<header><button class="sy" id="sy" data-a="sync"></button><h1>Lista della spesa</h1><div class="sub" id="sub"></div></header>
 <main id="app"></main>
 <nav><div id="tabs"></div></nav>
 <script>
@@ -69,7 +70,26 @@ var CAT={
 var DEF=[];Object.keys(CAT).forEach(function(c){CAT[c].split(",").forEach(function(n){DEF.push({n:n,c:c})})});
 var SC="Altro",K="listaSpesaV1",S={custom:[],list:[],hist:{}},tab="lista",shop=false,q="",pq="",sel={},bought={};
 try{var r=localStorage.getItem(K);if(r)S=Object.assign(S,JSON.parse(r))}catch(e){}
-function save(){try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}}
+var CK="listaSpesaCode",DB="https://spesa-app-c237e-default-rtdb.europe-west1.firebasedatabase.app/liste/",code="",st="off",showSync=false,busy=false,pt=null;
+try{code=localStorage.getItem(CK)||""}catch(e){}
+function snap(){return JSON.stringify({custom:S.custom,list:S.list,hist:S.hist})}
+var last=snap();
+function persist(){try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}}
+function save(){var n=snap();if(n==last)return;last=n;S.t=Date.now();persist();push()}
+function url(){return DB+code+".json"}
+function push(){if(!code)return;clearTimeout(pt);pt=setTimeout(function(){fetch(url(),{method:"PUT",body:JSON.stringify({t:S.t,d:snap()})}).then(function(r){setSt(r.ok?"ok":"er")}).catch(function(){setSt("er")})},600)}
+function setSt(s){st=s;var b=document.getElementById("sy");if(b){b.className="sy "+s;b.textContent=code?(s=="ok"?"☁ Sincronizzato":s=="er"?"☁ Offline":"☁ …"):"☁ Sincronizza"}}
+function merge(R){R.custom.forEach(function(p){if(!S.custom.some(function(x){return x.n==p.n}))S.custom.push(p)});
+R.list.forEach(function(i){var x=inList(i.n);if(x)x.q=Math.max(x.q,i.q);else S.list.push(i)});
+Object.keys(R.hist).forEach(function(n){var a=S.hist[n]||[];S.hist[n]=a.concat(R.hist[n].filter(function(t){return a.indexOf(t)<0})).sort(function(x,y){return x-y})})}
+function pull(first){if(!code||busy)return;busy=true;fetch(url()).then(function(r){return r.json()}).then(function(v){busy=false;
+if(!v||!v.d){if(S.list.length||S.custom.length||Object.keys(S.hist).length){S.t=Date.now();persist();push()}setSt("ok");return}
+var R=JSON.parse(v.d);R.custom=R.custom||[];R.list=R.list||[];R.hist=R.hist||{};
+if(first){merge(R);last=snap();S.t=Date.now();persist();push();setSt("ok");render();return}
+if(v.t>(S.t||0)){S.custom=R.custom;S.list=R.list;S.hist=R.hist;S.t=v.t;last=snap();persist();render()}
+else if((S.t||0)>v.t)push();
+setSt("ok")}).catch(function(){busy=false;setSt("er")})}
+function panel(){return '<div class="pan"><b>Sincronizzazione tra dispositivi</b><div class="sub" style="margin:4px 0 8px">Inserisci lo stesso codice su ogni dispositivo. Scegline uno lungo e non prevedibile (almeno 8 caratteri: lettere, numeri, trattini).</div><input id="sk" placeholder="es. famiglia-rossi-2026" value="'+esc(code)+'" autocomplete="off" autocapitalize="off"><div class="row" style="margin-top:8px"><button class="btn" data-a="link">'+(code?"Aggiorna codice":"Collega")+'</button>'+(code?'<button class="btn ghost" data-a="unlink">Scollega</button>':'')+'</div></div>'}
 function all(){return DEF.concat(S.custom)}
 function catOf(n){var f=all().find(function(p){return p.n.toLowerCase()==n.toLowerCase()});return f?f.c:"Altro"}
 function inList(n){return S.list.find(function(i){return i.n==n})}
@@ -82,7 +102,7 @@ if(h.length>=2){avg=(last-h[0])/(h.length-1)/864e5;due=since>=avg*0.85}
 out.push({n:n,k:h.length,since:since,avg:avg,due:due})});
 out.sort(function(a,b){return (b.due-a.due)||(b.k-a.k)});return out}
 function why(p){var s="acquistato "+p.k+(p.k==1?" volta":" volte");if(p.avg)s+=" · di solito ogni "+Math.max(1,Math.round(p.avg))+" gg";s+=" · ultimo "+(p.since<1?"oggi":Math.round(p.since)+" gg fa");return s}
-function render(){
+function render(){setSt(st);
 var h="";
 document.getElementById("sub").textContent=tab=="lista"?(S.list.length+" da comprare"):tab=="prod"?(all().length+" prodotti in catalogo"):"Cosa servirà alla prossima spesa";
 if(tab=="lista"){
@@ -118,11 +138,14 @@ if(o.length)h+='<div class="cat">Altri acquisti abituali</div>'+o.map(rowf).join
 h+='<button class="btn" style="width:100%;margin-top:12px" data-a="addsel">Aggiungi i selezionati alla lista</button>'}
 }
 var ae=document.activeElement,id=ae&&ae.id,pos=ae&&ae.selectionStart;
-document.getElementById("app").innerHTML=h;
+document.getElementById("app").innerHTML=(showSync?panel():"")+h;
 if(id){var e=document.getElementById(id);if(e){e.focus();try{e.setSelectionRange(pos,pos)}catch(x){}}}
 document.getElementById("tabs").innerHTML=[["lista","Lista"],["prod","Catalogo"],["prev","Previsione"]].map(function(t){return '<button class="'+(tab==t[0]?'on':'')+'" data-a="tab" data-t="'+t[0]+'">'+t[1]+'</button>'}).join("")}
 document.addEventListener("click",function(e){var b=e.target.closest("[data-a]");if(!b||b.tagName=="INPUT")return;var a=b.dataset.a,n=b.dataset.n,i;
-if(a=="tab"){tab=b.dataset.t;window.scrollTo(0,0)}
+if(a=="sync"){showSync=!showSync}
+else if(a=="link"){var c=document.getElementById("sk").value.toLowerCase().replace(/[^a-z0-9_-]/g,"");if(c.length<8){alert("Il codice deve avere almeno 8 caratteri (lettere, numeri, trattini).");return}code=c;try{localStorage.setItem(CK,c)}catch(x){}showSync=false;setSt("");pull(true)}
+else if(a=="unlink"){code="";try{localStorage.removeItem(CK)}catch(x){}showSync=false;setSt("off")}
+else if(a=="tab"){tab=b.dataset.t;window.scrollTo(0,0)}
 else if(a=="shop"){shop=!shop;bought={}}
 else if(a=="addp"){add(n);if(tab=="lista")q=""}
 else if(a=="addnew"){var nm=cap(q);if(nm){if(!all().some(function(p){return p.n.toLowerCase()==nm.toLowerCase()}))S.custom.push({n:nm,c:document.getElementById("sc").value});add(nm);q=""}}
@@ -138,6 +161,9 @@ save();render()});
 document.addEventListener("change",function(e){if(e.target.id=="sc")SC=e.target.value;if(e.target.dataset.a=="sel"){sel[e.target.dataset.n]=e.target.checked}});
 document.addEventListener("input",function(e){if(e.target.id=="q"){q=e.target.value;render()}if(e.target.id=="pq"){pq=e.target.value;render()}});
 render();
+if(code){setSt("");pull()}
+setInterval(function(){pull()},6000);
+document.addEventListener("visibilitychange",function(){if(!document.hidden)pull()});
 </script>
 </body>
 </html>
